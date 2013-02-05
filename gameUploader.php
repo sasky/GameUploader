@@ -19,7 +19,7 @@ class Gf_game_uploader {
             // form and processing of data and assets
             add_action( 'post_edit_form_tag' , array( $this , 'post_edit_form_tag' ));
             add_action( 'save_post', array( $this , 'process_zip_file' ));
-            // TODO add delete hook to remove the game on post delete
+            add_action( 'before_delete_post', array( $this , 'remove_game_file_on_delete'));
         } else {
             add_shortcode('gf_game',array (&$this, 'shortcode_hook') );
         }
@@ -46,17 +46,17 @@ class Gf_game_uploader {
         );
 
         $args = array(
-            'labels'        => $labels,
-            'description'   => 'Holds a list of Game Fruit games that can be displayed on this site',
-            'public'        => false,
-            'menu_position' => 65,
-            'supports'      => array( 'title', 'editor' ),
-            'has_archive'   => false,
-            'show_ui'       => true,
-            'show_in_nav_menus' => false,
+            'labels'             => $labels,
+            'description'        => 'Holds a list of Game Fruit games that can be displayed on this site',
+            'public'             => false,
+            'menu_position'      => 65,
+            'supports'           => array( 'title', 'editor' ),
+            'has_archive'        => false,
+            'show_ui'            => true,
+            'show_in_nav_menus'  => false,
             'publicly_queryable' => true,
-            'show_in_menu' => true,
-            'show_in_admin_bar' => false,
+            'show_in_menu'       => true,
+            'show_in_admin_bar'  => false,
             'menu_icon'=> '',// TODO get menu icon
             'hierarchical' => false
         );
@@ -70,15 +70,20 @@ class Gf_game_uploader {
                     'gf_games',
                     'normal',
                     'default' );
+
+        add_meta_box( 'display_options',
+                      __('Display Options'),
+                      array( $this , 'display_options_meta_box'),
+                      'gf_games',
+                      'side',
+                      'default');
     }
     function upload_zip_meta_box( $post ) {
     	wp_nonce_field( plugin_basename( __FILE__ ), 'upload_zip_meta_box' );
 
         $url_to_game = get_post_meta($post->ID, 'url_to_game', true);
 
-        ?>
-
-        <?php if($url_to_game){
+        if($url_to_game){
             echo '<strong> To Publish this game, place the following Shortcode in the content of any post or page. </strong></br>';
             echo '<strong style="color:green" > [gf_game id="' . $post->ID . '"]</strong>';
            // echo '<h5> The game has been uploaded to <br/> '. $url_to_game .' </h5>';
@@ -91,8 +96,39 @@ class Gf_game_uploader {
         <?php
     }
 
+    public function display_options_meta_box( $post ){
+        $defaults = array(  'width'        => 650,
+                            'height'       => 500,
+                            'show_title'   => 'false',
+                            'show_disc'    => 'false');
 
-    function process_zip_file( $post_id ) {
+        $args = get_post_meta( $post->ID, 'game_options', true );
+
+        if(is_array( $args )){
+            $args = $args + $defaults;
+        } else {
+            $args = $defaults;
+        }
+
+        wp_nonce_field( plugin_basename( __FILE__ ), 'upload_zip_meta_box' );
+        ?>
+        <label for="width_of_game" >Width</label>
+        <input name="game_options[width]" type="text" value="<?php echo $args['width'] ?>"/><br />
+        <br />
+        <label for="height_of_game" >Height</label>
+        <input name="game_options[height]" type="text" value="<?php echo $args['height'] ?>"/><br />
+        <br />
+        <label for="show_title" >Display the Title</label><br />
+        <input type="radio" name="game_options[show_title]" value="false" <?php checked($args['show_title'],'false') ?> />No<br />
+        <input type="radio" name="game_options[show_title]" value="true" <?php checked($args['show_title'],'true') ?> /> Yes<br />
+        <br />
+        <label for="show_disc" >Display the Description </label><br />
+        <input type="radio" name="game_options[show_disc]" value="false" <?php checked($args['show_disc'],'false')?> />No<br />
+        <input type="radio" name="game_options[show_disc]" value="true" <?php checked($args['show_disc'],'true') ?>" /> Yes<br />
+    <?php
+    }
+
+    public function process_zip_file( $post_id ) {
         if( empty($_POST) || !isset($_POST['upload_zip_meta_box']))
             return;
         // sercuity mumbo jumbo
@@ -124,76 +160,114 @@ class Gf_game_uploader {
         //1. make sure the file is a zip. and its legit
 
         $zip_name = $_FILES['gamezip']['name'];
-        if( ! preg_match('/^[0-9a-zA-Z\-_]+\.zip$/', $zip_name))
-            wp_die('Sorry, the file must end in the .zip extension, and can only contain letters (a-z) or (A-Z), numbers (0-9), underscores (_) and hyphens (-). No spaces allowed.');
+        if($zip_name){ // upload and save the files
+            if( ! preg_match('/^[0-9a-zA-Z\-_]+\.zip$/', $zip_name))
+                wp_die('Sorry, the file must end in the .zip extension, and can only contain letters (a-z) or (A-Z), numbers (0-9), underscores (_) and hyphens (-). No spaces allowed.');
 
-        //2. Upload the zip file
+            //2. Upload the zip file
 
-        //error_log('$zip_name ' .$zip_name);
-        $file_upload = wp_upload_bits( $_FILES['gamezip']['name'], null, file_get_contents($_FILES['gamezip']['tmp_name']));
-        // error_log('$file_upload:' . var_export($file_upload, TRUE));
-        if (  $file_upload['error']  )
-            wp_die( 'error uploading the zip archive ' .$file_upload['error'] );
+            $file_upload = wp_upload_bits( $_FILES['gamezip']['name'], null, file_get_contents($_FILES['gamezip']['tmp_name']));
 
-        // If there are files already in the desination directory, then delete them
+            if (  $file_upload['error']  )
+                wp_die( 'error uploading the zip archive ' .$file_upload['error'] );
 
-        $upload_dir = wp_upload_dir();
-        $upgrade_folder = $upload_dir['basedir'] . '/games/'. $post_id . '/';
-        if($wp_filesystem->is_dir( $upgrade_folder )){
-            $wp_filesystem->delete( $upgrade_folder , true );
-        }
+            // If there are files already in the desination directory, then delete them
 
-        //3. unzip the zip
+            $upload_dir = wp_upload_dir();
+            $upgrade_folder = $upload_dir['basedir'] . '/games/'. $post_id . '/';
 
-        $result = unzip_file($file_upload['file'], $upgrade_folder);
-        if( ! $result)
-            wp_die('Problem unzipping the file' .$result );
-
-        //4. Delete the zip
-        $temp_zip_file= $file_upload['file'];
-        if( $wp_filesystem->is_file( $temp_zip_file )){
-            $wp_filesystem->delete( $temp_zip_file );
-        }
-
-        //5. Place the url to the files in the post meta
-        $zip_name = preg_replace( '/\.zip$/','', $zip_name);
-        $dir =  $upgrade_folder . $zip_name;
-        //error_log('$dir:' . var_export($dir, TRUE));
-
-        //error_log('$dir ' . $dir);
-        if( $wp_filesystem->is_dir( $dir) ) {
-            // find the html doc
-            $dir_list = $wp_filesystem->dirlist( $dir );
-            error_log('$dir_list:' . var_export($dir_list, TRUE));
-            $html_file = '';
-            foreach($dir_list as $file){
-                if($file['type'] == 'f'){
-                    // this regx may need a bit more love, but should do the trick
-                   if(preg_match('/(\.html|\.htm)$/',$file['name'] )){
-                       $html_file = $file['name'];
-                   }
-                }
+            if($wp_filesystem->is_dir( $upgrade_folder )){
+                $wp_filesystem->delete( $upgrade_folder , true );
             }
-            // TODO if there is more than one html file, it will get the last one, refine this perhaps?
-            if(!$html_file)
-                wp_die('you need to upload one html file in your zip file ');
-            $url_to_game = content_url('/uploads/games/' . $post_id . '/' . $zip_name . '/' .$html_file );
-            //error_log('$url_to_game' . $url_to_game );
-            update_post_meta( $post_id, 'url_to_game', $url_to_game );
-        } else {
-            wp_die('There was a problem with the name of your ziped file');
+
+            //3. unzip the zip
+
+            $result = unzip_file($file_upload['file'], $upgrade_folder);
+            if( ! $result)
+                wp_die('Problem unzipping the file' .$result );
+
+            //4. Delete the zip
+            $temp_zip_file= $file_upload['file'];
+            if( $wp_filesystem->is_file( $temp_zip_file )){
+                $wp_filesystem->delete( $temp_zip_file );
+            }
+
+            //5. Place the url to the files in the post meta
+            $zip_name = preg_replace( '/\.zip$/','', $zip_name);
+            $dir =  $upgrade_folder . $zip_name;
+
+
+            if( $wp_filesystem->is_dir( $dir) ) {
+                // find the html doc
+                $dir_list = $wp_filesystem->dirlist( $dir );
+                // save directory to post meta so I can delete the files on a post delete hook
+                update_post_meta( $post_id, 'dir', $upgrade_folder );
+                $html_file = '';
+                foreach($dir_list as $file){
+                    if($file['type'] == 'f'){
+                        // this regx may need a bit more love, but should do the trick
+                       if(preg_match('/(\.html|\.htm)$/',$file['name'] )){
+                           $html_file = $file['name'];
+                       }
+                    }
+                }
+                // TODO if there is more than one html file, it will get the last one, refine this perhaps?
+                if(!$html_file)
+                    wp_die('you need to upload one html file in your zip file ');
+
+                $url_to_game = content_url('/uploads/games/' . $post_id . '/' . $zip_name . '/' .$html_file );
+                update_post_meta( $post_id, 'url_to_game', $url_to_game );
+
+            } else {
+                wp_die('There was a problem with the name of your ziped file');
+            }
         }
+
+        // Lets just quickly save the options meta box as well
+        // TODO a bit of verification wouldn't go a miss
+        $game_options = $_POST['game_options'];
+        update_post_meta( $post_id, 'game_options', $game_options );
 
     }
+    public function remove_game_file_on_delete( $postid ){
+
+        global $post_type;
+        if ( $post_type != 'gf_games' ) return;
+
+        $url = wp_nonce_url('wp-admin/edit.php','gamezip-delete');
+        if (false === ($creds = request_filesystem_credentials($url, '', false, false, null) ) ) {
+            wp_die('problem connecting to the WP file system');
+        }
+        if ( ! WP_Filesystem($creds) ) {
+            wp_die('problem connecting to the WP file system');
+        }
+        global $wp_filesystem;
+
+        $dir = get_post_meta( $postid , 'dir' , true );
+        global $wp_filesystem;
+
+        if( $dir ){
+            $wp_filesystem->delete( $dir , true);
+        }
+
+        }
     public function shortcode_hook( $args ){
         // I made the booleans strings to help with the shortcode parsing
-        $defaults = array( 'id'            => null,
-                            'width'        => 650,
-                            'height'       => 500,
-                            'show_title'   => 'false',
-                            'show_disc'    => 'false');
+        $defaults = array(    'id'           => null,
+                              'width'        => 650,
+                              'height'       => 500,
+                              'show_title'   => 'false',
+                              'show_disc'    => 'false');
 
-        $args =   $args + $defaults;
+        $from_options = get_post_meta( $args['id'], 'game_options', true );
+        if(!is_array($from_options))
+            $from_options = $defaults;
+
+        // shortcode options overide options from post meta, which in turn overide the defaults
+        // $from_options should always be set so $defaults isn't really needed, just here for clarity
+
+        $args = $args + $from_options ;
+
         $url = get_post_meta( $args['id'] , 'url_to_game', true);
 
         $title = '';
@@ -201,12 +275,11 @@ class Gf_game_uploader {
         // only grab the loop if needed
         if( $args['show_title'] == 'true' || $args['show_disc'] == 'true' ){
             $query = new WP_Query( array('post_type' => 'gf_games',
-                                         'p' => $args['id'],
-                                         ));
-            //error_log('$quary:' . var_export($query, TRUE));
+                                         'p' => $args['id'] ) );
+
                  while( $query->have_posts() ){
                      $query->next_post();
-                     error_log('$quary:' . var_export($query, TRUE));
+
                      $title = $query->post->post_title;
                      $disc  = $query->post->post_content;
                  }
@@ -214,7 +287,7 @@ class Gf_game_uploader {
         }
 
 
-        $html = '';
+        $html = '<div class="games">';
         if( $args['show_title'] == 'true' ){
             $html .= '<h3 class="game_title">' .$title . '</h3>';
         }
@@ -225,7 +298,7 @@ class Gf_game_uploader {
         if( $args['show_disc'] == 'true' ){
             $html .= '<p class="game_disc">' .$disc . '</p>';
         }
-
+        $html .= '</div>';
         return $html;
     }
 }
