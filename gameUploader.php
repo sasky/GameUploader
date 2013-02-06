@@ -129,6 +129,9 @@ class Gf_game_uploader {
     }
 
     public function process_zip_file( $post_id ) {
+        global $post_type;
+        if ( $post_type != 'gf_games' )
+            return;
         if( empty($_POST) || !isset($_POST['upload_zip_meta_box']))
             return;
         // sercuity mumbo jumbo
@@ -293,7 +296,7 @@ class Gf_game_uploader {
         }
 
         $html .= '<iframe width="' . $args['width'] . '" height="' . $args['height'] . '"
-        src="' . $url . '" scrolling="no" seamless="seamless" ></iframe>';
+        src="' . $url . '" scrolling="no" frameborder="no" seamless="seamless" ></iframe>';
 
         if( $args['show_disc'] == 'true' ){
             $html .= '<p class="game_disc">' .$disc . '</p>';
